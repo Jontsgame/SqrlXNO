@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<title>Squirrel Leap</title>
+
+<style>
+* {
+  box-sizing: border-box;
+  user-select: none;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, sans-serif;
+  background: url("background.png") no-repeat center / cover;
+  color: #fff;
+  text-align: center;
+  overflow: hidden;
+}
+
+h1 {
+  margin: 10px 0 5px;
+}
+
+#hud {
+  display: flex;
+  justify-content: center;
+  gap: 25px;
+  font-size: 18px;
+  margin-bottom: 10px;
+}
+
+#game {
+  position: relative;
+  width: 100%;
+  height: 75vh;
+}
+
+#startTree {
+  position: absolute;
+  bottom: 40px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 64px;
+  height: 128px;
+  background: url("tree.png") no-repeat center / contain;
+}
+
+.tree {
+  position: absolute;
+  bottom: 220px;
+  width: 64px;
+  height: 128px;
+  background: url("tree.png") no-repeat center / contain;
+  cursor: pointer;
+  transition: transform 0.2s;
+}
+
+.tree:hover {
+  transform: scale(1.1);
+}
+
+.tree.broken {
+  background-image: url("tree_broken.png");
+  animation: fall 0.6s forwards;
+  pointer-events: none;
+}
+
+@keyframes fall {
+  to {
+    transform: rotate(35deg) translateY(260px);
+    opacity: 0;
+  }
+}
+
+#squirrel {
+  position: absolute;
+  width: 48px;
+  height: 48px;
+  background: url("squirrel.png") no-repeat center / contain;
+  left: 50%;
+  bottom: 110px;
+  transform: translateX(-50%);
+  transition: left 0.4s ease, bottom 0.4s ease;
+  pointer-events: none;
+}
+
+#message {
+  font-size: 22px;
+  min-height: 30px;
+}
+
+button {
+  margin-top: 6px;
+  padding: 10px 22px;
+  font-size: 16px;
+  border-radius: 10px;
+  border: none;
+  cursor: pointer;
+}
+</style>
+</head>
+
+<body>
+
+<h1>🐿️ Squirrel Leap</h1>
+
+<div id="hud">
+  <div id="tries"></div>
+  <div id="currency"></div>
+  <div id="timer"></div>
+</div>
+
+<div id="game">
+  <div id="squirrel"></div>
+  <div id="startTree"></div>
+</div>
+
+<div id="message"></div>
+<button onclick="resetGame()">Neue Runde</button>
+
+<script>
+/* ========= KONFIG ========= */
+const TOTAL_TREES = 10;
+const MAX_TRIES = 5;
+const COST_PER_ROUND = 0.000010; // in NANO
+const DAILY_REFILL = 0.000080; // in NANO
+const REFILL_TIME = 24 * 60 * 60 * 1000;
+
+/* ========= STATE ========= */
+let correctTree = 0;
+let triesLeft = MAX_TRIES;
+let gameOver = false;
+let attemptCount = 0;
+let trees = [];
+
+/* ========= PERSISTENZ ========= */
+let nuts = Number(localStorage.getItem("nuts")) || DAILY_REFILL;
+let lastRefill = Number(localStorage.getItem("lastRefill")) || Date.now();
+
+/* ========= ELEMENTE ========= */
+const game = document.getElementById("game");
+const squirrel = document.getElementById("squirrel");
+const triesDisplay = document.getElementById("tries");
+const currencyDisplay = document.getElementById("currency");
+const timerDisplay = document.getElementById("timer");
+const message = document.getElementById("message");
+
+/* ========= LOGIK ========= */
+
+function checkRefill() {
+  if (Date.now() - lastRefill >= REFILL_TIME) {
+    nuts = DAILY_REFILL;
+    lastRefill = Date.now();
+    saveCurrency();
+  }
+}
+
+function saveCurrency() {
+  localStorage.setItem("nuts", nuts);
+  localStorage.setItem("lastRefill", lastRefill);
+}
+
+function updateHUD() {
+  triesDisplay.textContent = "Tries: " + "❤️".repeat(triesLeft);
+  currencyDisplay.textContent = "NANO: 💰 " + nuts;
+
+  const remaining = REFILL_TIME - (Date.now() - lastRefill);
+  if (remaining > 0 && nuts <= 0) {
+    const h = Math.floor(remaining / 3600000);
+    const m = Math.floor((remaining % 3600000) / 60000);
+    timerDisplay.textContent = `Refill in ${h}h ${m}m`;
+  } else {
+    timerDisplay.textContent = "";
+  }
+}
+
+function setupTrees() {
+  trees.forEach(t => t.remove());
+  trees = [];
+
+  for (let i = 0; i < TOTAL_TREES; i++) {
+    const tree = document.createElement("div");
+    tree.className = "tree";
+    tree.style.left = `${5 + i * (90 / (TOTAL_TREES - 1))}%`;
+    tree.onclick = () => jumpToTree(tree, i);
+    game.appendChild(tree);
+    trees.push(tree);
+  }
+}
+
+function jumpToTree(tree, index) {
+  if (gameOver || tree.classList.contains("broken")) return;
+
+  attemptCount++;
+  updateHUD();
+
+  const rect = tree.getBoundingClientRect();
+  const gameRect = game.getBoundingClientRect();
+
+  squirrel.style.left = (rect.left - gameRect.left + 8) + "px";
+  squirrel.style.bottom = "320px";
+
+  setTimeout(() => {
+    if (index === correctTree) {
+      let reward = 0;
+      if (attemptCount === 1) reward = 0.000020;
+      else if (attemptCount === 2) reward = 0.000015;
+      else if (attemptCount === 3) reward = 0.000010;
+
+      nuts += reward;
+      saveCurrency();
+
+      message.textContent = reward > 0
+        ? `🎉 You won! +${reward} NANO`
+        : `😅 You won, but no reward`;
+
+      gameOver = true;
+      updateHUD();
+    } else {
+      tree.classList.add("broken");
+      triesLeft--;
+      updateHUD();
+
+      squirrel.style.bottom = "60px";
+
+      setTimeout(() => {
+        squirrel.style.left = "50%";
+        squirrel.style.bottom = "110px";
+      }, 300);
+
+      if (triesLeft <= 0) {
+        message.textContent = "💀 Game Over";
+        gameOver = true;
+      }
+    }
+  }, 400);
+}
+
+function resetGame() {
+  checkRefill();
+
+  if (nuts < COST_PER_ROUND) {
+    updateHUD();
+    message.textContent = "⏳ No NANO left today.";
+    return;
+  }
+
+  // 💰 Kosten EINMAL pro Runde
+  nuts -= COST_PER_ROUND;
+  saveCurrency();
+
+  correctTree = Math.floor(Math.random() * TOTAL_TREES);
+  triesLeft = MAX_TRIES;
+  attemptCount = 0;
+  gameOver = false;
+  message.textContent = "";
+
+  setupTrees();
+  updateHUD();
+
+  squirrel.style.left = "50%";
+  squirrel.style.bottom = "110px";
+}
+
+/* ========= START ========= */
+checkRefill();
+resetGame();
+</script>
+
+</body>
+</html>
